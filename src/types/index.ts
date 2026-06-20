@@ -59,6 +59,7 @@ export interface FilmsResponse {
 export interface ScrapingResult {
   title: string
   slug: string
+  original_title?: string
   imdb_id?: string
   imdb_rating?: number
   year?: number

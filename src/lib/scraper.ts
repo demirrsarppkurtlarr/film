@@ -1,7 +1,48 @@
-import * as cheerio from 'cheerio'
 import { supabaseAdmin } from './supabase'
 import { generateSlug, extractImdbId, extractYear, cleanNumber } from './utils'
 import { ScrapingResult } from '@/types'
+
+function getTextByTag(html: string, tag: string): string {
+  const re = new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, 'is')
+  const m = html.match(re)
+  return m ? m[1].replace(/<[^>]*>/g, '').trim() : ''
+}
+
+function getMetaContent(html: string, property: string): string {
+  const re = new RegExp(`<meta[^>]*property=["']${property}["'][^>]*content=["']([^"']*)["']`, 'i')
+  const m = html.match(re)
+  if (m) return m[1]
+  const re2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*property=["']${property}["']`, 'i')
+  const m2 = html.match(re2)
+  return m2 ? m2[1] : ''
+}
+
+function getAttr(html: string, selector: string, attr: string): string {
+  const re = new RegExp(`${selector}[^>]*${attr}=["']([^"']*)["']`, 'i')
+  const m = html.match(re)
+  return m ? m[1] : ''
+}
+
+function getAllLinks(html: string, pattern: string): string[] {
+  const links: string[] = []
+  const re = new RegExp(`href=["']([^"']*${pattern}[^"']*)["']`, 'gi')
+  let m
+  while ((m = re.exec(html)) !== null) {
+    links.push(m[1])
+  }
+  return [...new Set(links)]
+}
+
+function getLinkTexts(html: string, pattern: string): string[] {
+  const texts: string[] = []
+  const re = new RegExp(`<a[^>]*href=["']([^"']*${pattern}[^"']*)["'][^>]*>(.*?)</a>`, 'gi')
+  let m
+  while ((m = re.exec(html)) !== null) {
+    const text = m[2].replace(/<[^>]*>/g, '').trim()
+    if (text) texts.push(text)
+  }
+  return [...new Set(texts)]
+}
 
 export class HdfilmcehennemiScraper {
   private baseUrl = 'https://www.hdfilmcehennemi.nl'
@@ -11,19 +52,14 @@ export class HdfilmcehennemiScraper {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
-  private async fetchHtml(url: string): Promise<cheerio.CheerioAPI | null> {
+  private async fetchHtml(url: string): Promise<string | null> {
     try {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
         },
       })
 
@@ -31,8 +67,7 @@ export class HdfilmcehennemiScraper {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
-      const html = await response.text()
-      return cheerio.load(html)
+      return await response.text()
     } catch (error) {
       console.error(`Error fetching ${url}:`, error)
       return null
@@ -40,12 +75,12 @@ export class HdfilmcehennemiScraper {
   }
 
   async scrapeFilmPage(url: string): Promise<ScrapingResult | null> {
-    const $ = await this.fetchHtml(url)
-    if (!$) return null
+    const html = await this.fetchHtml(url)
+    if (!html) return null
 
     try {
       // Ana başlık
-      const fullTitle = $('h1').first().text().trim()
+      const fullTitle = getTextByTag(html, 'h1')
       if (!fullTitle) return null
 
       // Başlık ve orijinal başlık ayrımı
@@ -63,134 +98,100 @@ export class HdfilmcehennemiScraper {
         }
       }
 
-      // Film bilgi bölümü
-      const infoSection = $('.film-info, .movie-info, .movie-details').first()
-      
       // IMDb puanı
       let imdbRating: number | undefined
-      const imdbText = infoSection.text() + $('body').text()
-      const imdbMatch = imdbText.match(/IMDb\s*(?:Puanı)?\s*[:\s]*\s*([\d,.]+)/i)
+      const imdbMatch = html.match(/IMDb\s*(?:Puanı)?\s*[:\s]*\s*([\d,.]+)/i)
       if (imdbMatch) {
         imdbRating = cleanNumber(imdbMatch[1])
       }
 
       // IMDb ID
       let imdbId: string | undefined
-      infoSection.find('a').each((_: number, elem: any) => {
-        const href = $(elem).attr('href')
-        if (href && href.includes('imdb.com')) {
-          imdbId = extractImdbId(href)
-        }
-      })
+      const imdbLinkMatch = html.match(/href=["'](https?:\/\/(?:www\.)?imdb\.com\/title\/(tt\d+))/i)
+      if (imdbLinkMatch) {
+        imdbId = imdbLinkMatch[2]
+      }
 
       // Yıl
       let year: number | undefined
-      const yearLink = $('a[href*="/yil/"]').first().text()
-      if (yearLink) {
-        year = extractYear(yearLink)
+      const yearLinks = getLinkTexts(html, '/yil/')
+      if (yearLinks.length > 0) {
+        year = extractYear(yearLinks[0])
       }
 
       // Ülke
       let country: string | undefined
-      const countryLink = $('a[href*="/ulke/"]').first().text()
-      if (countryLink) {
-        country = countryLink.replace(' Filmleri', '').replace(' filmleri', '').trim()
+      const countryLinks = getLinkTexts(html, '/ulke/')
+      if (countryLinks.length > 0) {
+        country = countryLinks[0].replace(/ Filmleri/i, '').replace(/ filmleri/i, '').trim()
       }
 
       // Türler
-      const genres: string[] = []
-      $('a[href*="/tur/"]').each((_: number, elem: any) => {
-        const genre = $(elem).text().trim()
-        if (genre && !genre.includes('Filmleri') && !genre.includes('izle')) {
-          genres.push(genre)
-        }
-      })
+      const genreTexts = getLinkTexts(html, '/tur/')
+      const genres = genreTexts.filter(g =>
+        g && g.length > 1 && g.length < 30 &&
+        !g.includes('Filmleri') && !g.includes('izle') && !g.includes('film')
+      )
 
       // Dil türleri
       const languageTypes: string[] = []
-      const languageText = $('body').text()
-      if (languageText.includes('Türkçe Dublaj')) {
+      const bodyText = html.replace(/<[^>]*>/g, ' ')
+      if (bodyText.includes('Türkçe Dublaj')) {
         languageTypes.push('Türkçe Dublaj')
-      } else if (languageText.includes('Dublaj')) {
+      } else if (bodyText.includes('Dublaj')) {
         languageTypes.push('Dublaj')
       }
-      if (languageText.includes('Türkçe Altyazılı')) {
+      if (bodyText.includes('Türkçe Altyazılı')) {
         languageTypes.push('Türkçe Altyazılı')
-      } else if (languageText.includes('Altyazılı')) {
+      } else if (bodyText.includes('Altyazılı')) {
         languageTypes.push('Altyazılı')
       }
-      
       if (languageTypes.length === 0) {
         languageTypes.push('Altyazılı')
       }
 
       // Açıklama
       let description: string | undefined
-      const descriptionSelectors = [
-        '.film-description p',
-        '.movie-description p',
-        '.description p',
-        '.summary p',
-        '.film-info + p'
-      ]
-      
-      for (const selector of descriptionSelectors) {
-        const desc = $(selector).first().text().trim()
-        if (desc && desc.length > 50) {
+      const descMatch = html.match(/<p[^>]*>([\s\S]{50,}?)<\/p>/i)
+      if (descMatch) {
+        const desc = descMatch[1].replace(/<[^>]*>/g, '').trim()
+        if (desc.length > 50) {
           description = desc
-          break
+        }
+      }
+      if (!description) {
+        const ogDesc = getMetaContent(html, 'og:description')
+        if (ogDesc && ogDesc.length > 30) {
+          description = ogDesc
         }
       }
 
       // Poster
       let posterUrl: string | undefined
-      const posterSelectors = [
-        '.poster img',
-        '.movie-poster img',
-        '.film-poster img',
-        '.main-poster img'
-      ]
-      
-      for (const selector of posterSelectors) {
-        const src = $(selector).first().attr('src') || $(selector).first().attr('data-src')
-        if (src && !src.includes('placeholder')) {
-          posterUrl = src
-          break
+      const ogImage = getMetaContent(html, 'og:image')
+      if (ogImage && !ogImage.includes('placeholder')) {
+        posterUrl = ogImage
+      }
+      if (!posterUrl) {
+        const imgMatch = html.match(/<img[^>]*class=["'][^"']*poster[^"']*["'][^>]*src=["']([^"']*)["']/i)
+        if (imgMatch) {
+          posterUrl = imgMatch[1]
         }
       }
-      
-      // Fallback: Open Graph image
       if (!posterUrl) {
-        const ogImage = $('meta[property="og:image"]').attr('content')
-        if (ogImage) {
-          posterUrl = ogImage
+        const imgMatch2 = html.match(/<img[^>]*src=["'](https?:\/\/[^"']*(?:poster|cover|afis)[^"']*)["']/i)
+        if (imgMatch2) {
+          posterUrl = imgMatch2[1]
         }
       }
 
       // Oyuncular
       const actors: Array<{ name: string; character?: string; voice_role?: string }> = []
-      const actorSelectors = [
-        '.cast .actor',
-        '.actors .actor',
-        '.oyuncular a',
-        'a[href*="/oyuncu/"]'
-      ]
-      
-      for (const selector of actorSelectors) {
-        $(selector).each((_: number, elem: any) => {
-          const actorName = $(elem).text().trim()
-          const characterName = $(elem).find('.character').text().trim()
-          
-          if (actorName && actorName.length > 1 && actorName.length < 50) {
-            actors.push({
-              name: actorName,
-              character: characterName || undefined,
-              voice_role: undefined
-            })
-          }
-        })
-        
-        if (actors.length > 0) break
+      const actorLinks = getLinkTexts(html, '/oyuncu/')
+      for (const actorName of actorLinks) {
+        if (actorName && actorName.length > 1 && actorName.length < 50) {
+          actors.push({ name: actorName })
+        }
       }
 
       await this.sleep(this.delay)
@@ -221,14 +222,14 @@ export class HdfilmcehennemiScraper {
 
     try {
       // Ana sayfa
-      const home$ = await this.fetchHtml(this.baseUrl)
-      if (home$) {
-        home$('a[href^="/"]').each((_: number, elem: any) => {
-          const href = home$(elem).attr('href')
-          if (href && this.isFilmUrl(href)) {
+      const homeHtml = await this.fetchHtml(this.baseUrl)
+      if (homeHtml) {
+        const links = getAllLinks(homeHtml, '^/')
+        for (const href of links) {
+          if (this.isFilmUrl(href)) {
             urls.add(this.baseUrl + href)
           }
-        })
+        }
       }
 
       // Kategori sayfaları
@@ -241,19 +242,19 @@ export class HdfilmcehennemiScraper {
 
       for (const categoryPath of categoryPaths) {
         for (let page = 1; page <= maxPages; page++) {
-          const pageUrl = page === 1 
-            ? this.baseUrl + categoryPath 
+          const pageUrl = page === 1
+            ? this.baseUrl + categoryPath
             : this.baseUrl + categoryPath + `page/${page}/`
-          
-          const $ = await this.fetchHtml(pageUrl)
-          if (!$) continue
 
-          $('a[href^="/"]').each((_: number, elem: any) => {
-            const href = $(elem).attr('href')
-            if (href && this.isFilmUrl(href)) {
+          const html = await this.fetchHtml(pageUrl)
+          if (!html) continue
+
+          const links = getAllLinks(html, '^/')
+          for (const href of links) {
+            if (this.isFilmUrl(href)) {
               urls.add(this.baseUrl + href)
             }
-          })
+          }
 
           await this.sleep(this.delay)
         }
@@ -263,15 +264,15 @@ export class HdfilmcehennemiScraper {
       const currentYear = new Date().getFullYear()
       for (const year of [currentYear, currentYear - 1, currentYear - 2]) {
         const yearUrl = `${this.baseUrl}/yil/${year}-filmleri-izle/`
-        const $ = await this.fetchHtml(yearUrl)
-        if (!$) continue
+        const html = await this.fetchHtml(yearUrl)
+        if (!html) continue
 
-        $('a[href^="/"]').each((_: number, elem: any) => {
-          const href = $(elem).attr('href')
-          if (href && this.isFilmUrl(href)) {
+        const links = getAllLinks(html, '^/')
+        for (const href of links) {
+          if (this.isFilmUrl(href)) {
             urls.add(this.baseUrl + href)
           }
-        })
+        }
 
         await this.sleep(this.delay)
       }
@@ -295,13 +296,12 @@ export class HdfilmcehennemiScraper {
     if (href.includes('//')) return false
     if (href === '/') return false
     if (href.split('/').filter(Boolean).length !== 1) return false
-    
+
     return href.length > 2
   }
 
   async saveFilmToDatabase(filmData: ScrapingResult): Promise<boolean> {
     try {
-      // Var mı kontrol et
       const { data: existing } = await supabaseAdmin
         .from('films')
         .select('id')
@@ -309,16 +309,15 @@ export class HdfilmcehennemiScraper {
         .single()
 
       if (existing) {
-        console.log(`⚠️ Already exists: ${filmData.title}`)
+        console.log(`Already exists: ${filmData.title}`)
         return false
       }
 
-      // Film ekle
       const { data: film, error: filmError } = await supabaseAdmin
         .from('films')
         .insert({
           title: filmData.title,
-          original_title: filmData.title !== filmData.title ? filmData.title : undefined,
+          original_title: filmData.original_title,
           slug: filmData.slug,
           imdb_id: filmData.imdb_id,
           imdb_rating: filmData.imdb_rating,
@@ -339,10 +338,9 @@ export class HdfilmcehennemiScraper {
         return false
       }
 
-      // Oyuncuları ekle
       for (const actorData of filmData.actors) {
         const actorSlug = generateSlug(actorData.name)
-        
+
         const { data: actor } = await supabaseAdmin
           .from('actors')
           .upsert({
@@ -364,10 +362,9 @@ export class HdfilmcehennemiScraper {
         }
       }
 
-      // Kategorileri güncelle
       for (const genreName of filmData.genres) {
         const genreSlug = generateSlug(genreName)
-        
+
         const { data: category } = await supabaseAdmin
           .from('categories')
           .upsert({
@@ -388,7 +385,7 @@ export class HdfilmcehennemiScraper {
         }
       }
 
-      console.log(`✅ Saved: ${filmData.title}`)
+      console.log(`Saved: ${filmData.title}`)
       return true
 
     } catch (error) {
@@ -398,10 +395,10 @@ export class HdfilmcehennemiScraper {
   }
 
   async runFullScraping(): Promise<{ success: number; failed: number; total: number }> {
-    console.log('🚀 Starting full scraping process...')
-    
+    console.log('Starting full scraping process...')
+
     const filmUrls = await this.discoverFilmUrls()
-    console.log(`📊 Found ${filmUrls.length} film URLs`)
+    console.log(`Found ${filmUrls.length} film URLs`)
 
     let successCount = 0
     let failCount = 0
@@ -410,7 +407,7 @@ export class HdfilmcehennemiScraper {
 
     for (let i = 0; i < filmUrls.length; i += maxConcurrent) {
       const batch = filmUrls.slice(i, i + maxConcurrent)
-      
+
       const promises = batch.map(async (url) => {
         const filmData = await this.scrapeFilmPage(url)
         if (filmData) {
@@ -427,7 +424,6 @@ export class HdfilmcehennemiScraper {
       console.log(`Progress: ${Math.min(i + maxConcurrent, filmUrls.length)}/${filmUrls.length} | Success: ${successCount} | Failed: ${failCount}`)
     }
 
-    // Log kaydı
     await supabaseAdmin.from('scraping_logs').insert({
       source_url: this.baseUrl,
       action: 'full-scraping',
@@ -436,7 +432,7 @@ export class HdfilmcehennemiScraper {
       films_count: successCount
     })
 
-    console.log(`✅ Scraping completed! Success: ${successCount}, Failed: ${failCount}`)
+    console.log(`Scraping completed! Success: ${successCount}, Failed: ${failCount}`)
     return { success: successCount, failed: failCount, total: filmUrls.length }
   }
 }
