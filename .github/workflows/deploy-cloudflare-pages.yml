@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Build with @cloudflare/next-on-pages
-        run: npm run pages:build
+      - name: Build with OpenNext for Cloudflare
+        run: npm run build:cf
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -34,9 +34,9 @@ jobs:
           SCRAPING_DELAY: ${{ secrets.SCRAPING_DELAY }}
           MAX_CONCURRENT_REQUESTS: ${{ secrets.MAX_CONCURRENT_REQUESTS }}
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          command: deploy

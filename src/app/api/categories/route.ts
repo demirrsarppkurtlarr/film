@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCategories } from '@/lib/supabase'
 
-export const runtime = 'edge'
 
 export async function GET() {
   try {
