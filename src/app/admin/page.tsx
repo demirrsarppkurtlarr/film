@@ -29,7 +29,16 @@ export default function AdminPage() {
         body: JSON.stringify({ secret, action: 'full' })
       })
 
-      const data = await response.json()
+      const text = await response.text()
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch {
+        addLog(`Hata: Sunucu geçersiz yanıt döndürdü (HTTP ${response.status})`)
+        addLog(`Yanıt: ${text.substring(0, 200)}`)
+        toast.error(`Sunucu hatası (HTTP ${response.status})`)
+        return
+      }
 
       if (response.ok) {
         toast.success(data.message)
@@ -38,9 +47,9 @@ export default function AdminPage() {
         toast.error(data.error || 'Bir hata oluştu')
         addLog(`Hata: ${data.error || 'Bilinmeyen hata'}`)
       }
-    } catch (error) {
+    } catch (error: any) {
       toast.error('İstek gönderilirken hata oluştu')
-      addLog(`Hata: ${error}`)
+      addLog(`Hata: ${error?.message || error}`)
     } finally {
       setLoading(false)
     }
@@ -62,18 +71,31 @@ export default function AdminPage() {
         body: JSON.stringify({ secret, action: 'single', url })
       })
 
-      const data = await response.json()
+      const text = await response.text()
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch {
+        addLog(`Hata: Sunucu geçersiz yanıt döndürdü (HTTP ${response.status})`)
+        addLog(`Yanıt: ${text.substring(0, 200)}`)
+        toast.error(`Sunucu hatası (HTTP ${response.status})`)
+        return
+      }
 
       if (response.ok) {
         toast.success(data.success ? 'Film kaydedildi' : 'Film zaten mevcut veya kaydedilemedi')
         addLog(data.success ? `Kaydedildi: ${data.film?.title}` : 'Kaydedilemedi veya zaten mevcut')
+        if (data.film) {
+          addLog(`Başlık: ${data.film.title}`)
+          addLog(`IMDb: ${data.film.imdb_rating || 'N/A'} | Yıl: ${data.film.year || 'N/A'}`)
+        }
       } else {
         toast.error(data.error || 'Bir hata oluştu')
         addLog(`Hata: ${data.error || 'Bilinmeyen hata'}`)
       }
-    } catch (error) {
+    } catch (error: any) {
       toast.error('İstek gönderilirken hata oluştu')
-      addLog(`Hata: ${error}`)
+      addLog(`Hata: ${error?.message || error}`)
     } finally {
       setLoading(false)
     }
