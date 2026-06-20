@@ -53,59 +53,91 @@ export class HdfilmcehennemiScraper {
   }
 
   private async fetchHtml(url: string): Promise<string | null> {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Connection': 'keep-alive',
-        },
-      })
+    const proxies = [
+      (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      (u: string) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+      (u: string) => u,
+    ]
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    for (const proxy of proxies) {
+      try {
+        const fetchUrl = proxy(url)
+        const response = await fetch(fetchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Connection': 'keep-alive',
+          },
+        })
+
+        if (!response.ok) {
+          console.error(`Proxy fetch failed: HTTP ${response.status}`)
+          continue
+        }
+
+        const html = await response.text()
+        if (html.length > 500 && !html.includes("This site can")) {
+          return html
+        }
+        console.error(`Proxy returned block page, trying next...`)
+      } catch (error) {
+        console.error(`Proxy error:`, error)
       }
-
-      return await response.text()
-    } catch (error) {
-      console.error(`Error fetching ${url}:`, error)
-      return null
     }
+    return null
   }
 
   async debugFetch(url: string): Promise<{ status: number; ok: boolean; htmlLength: number; hasH1: boolean; h1Text: string; first500chars: string }> {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Connection': 'keep-alive',
-        },
-      })
+    const proxies = [
+      (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      (u: string) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+      (u: string) => u,
+    ]
 
-      const html = await response.text()
-      const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
-      const h1Text = h1Match ? h1Match[1].replace(/<[^>]*>/g, '').trim() : ''
+    for (let i = 0; i < proxies.length; i++) {
+      try {
+        const fetchUrl = proxies[i](url)
+        const response = await fetch(fetchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Connection': 'keep-alive',
+          },
+        })
 
-      return {
-        status: response.status,
-        ok: response.ok,
-        htmlLength: html.length,
-        hasH1: !!h1Match,
-        h1Text: h1Text.substring(0, 200),
-        first500chars: html.substring(0, 500).replace(/\n/g, ' ')
+        const html = await response.text()
+        const isBlock = html.includes("This site can") || html.length < 500
+        const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
+        const h1Text = h1Match ? h1Match[1].replace(/<[^>]*>/g, '').trim() : ''
+
+        return {
+          status: response.status,
+          ok: response.ok && !isBlock,
+          htmlLength: html.length,
+          hasH1: !!h1Match,
+          h1Text: h1Text.substring(0, 200),
+          first500chars: `Proxy ${i}: ${html.substring(0, 300).replace(/\n/g, ' ')}`
+        }
+      } catch (error: any) {
+        return {
+          status: 0,
+          ok: false,
+          htmlLength: 0,
+          hasH1: false,
+          h1Text: '',
+          first500chars: `Proxy ${i} error: ${error?.message || error}`
+        }
       }
-    } catch (error: any) {
-      return {
-        status: 0,
-        ok: false,
-        htmlLength: 0,
-        hasH1: false,
-        h1Text: '',
-        first500chars: `Fetch error: ${error?.message || error}`
-      }
+    }
+    return {
+      status: 0,
+      ok: false,
+      htmlLength: 0,
+      hasH1: false,
+      h1Text: '',
+      first500chars: 'All proxies failed'
     }
   }
 
