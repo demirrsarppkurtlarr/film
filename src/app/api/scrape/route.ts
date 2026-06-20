@@ -38,8 +38,9 @@ export async function POST(request: NextRequest) {
       }
       
       if (!filmData) {
+        const debugInfo = await scraper.debugFetch(url)
         return NextResponse.json(
-          { error: 'Film verisi bulunamadı. URL kontrol edin.' },
+          { error: 'Film verisi bulunamadı. URL kontrol edin.', debug: debugInfo },
           { status: 400 }
         )
       }

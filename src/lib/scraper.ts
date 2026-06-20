@@ -74,6 +74,41 @@ export class HdfilmcehennemiScraper {
     }
   }
 
+  async debugFetch(url: string): Promise<{ status: number; ok: boolean; htmlLength: number; hasH1: boolean; h1Text: string; first500chars: string }> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Connection': 'keep-alive',
+        },
+      })
+
+      const html = await response.text()
+      const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
+      const h1Text = h1Match ? h1Match[1].replace(/<[^>]*>/g, '').trim() : ''
+
+      return {
+        status: response.status,
+        ok: response.ok,
+        htmlLength: html.length,
+        hasH1: !!h1Match,
+        h1Text: h1Text.substring(0, 200),
+        first500chars: html.substring(0, 500).replace(/\n/g, ' ')
+      }
+    } catch (error: any) {
+      return {
+        status: 0,
+        ok: false,
+        htmlLength: 0,
+        hasH1: false,
+        h1Text: '',
+        first500chars: `Fetch error: ${error?.message || error}`
+      }
+    }
+  }
+
   async scrapeFilmPage(url: string): Promise<ScrapingResult | null> {
     const html = await this.fetchHtml(url)
     if (!html) return null

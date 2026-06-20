@@ -92,6 +92,11 @@ export default function AdminPage() {
       } else {
         toast.error(data.error || 'Bir hata oluştu')
         addLog(`Hata: ${data.error || 'Bilinmeyen hata'}`)
+        if (data.debug) {
+          addLog(`Debug - Status: ${data.debug.status}, OK: ${data.debug.ok}, HTML uzunluk: ${data.debug.htmlLength}`)
+          addLog(`Debug - H1 var: ${data.debug.hasH1}, H1: ${data.debug.h1Text}`)
+          addLog(`Debug - İlk 500: ${data.debug.first500chars?.substring(0, 200)}`)
+        }
       }
     } catch (error: any) {
       toast.error('İstek gönderilirken hata oluştu')
